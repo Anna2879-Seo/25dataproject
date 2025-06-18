@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import koreanize_matplotlib  # 한글 깨짐 방지
+import koreanize_matplotlib
 
 st.set_page_config(page_title="🧑‍🦲 외국인 비율 대시보드", layout="wide")
 
@@ -9,26 +9,35 @@ st.set_page_config(page_title="🧑‍🦲 외국인 비율 대시보드", layou
 def load_data() -> pd.DataFrame:
     df = pd.read_csv("202505_202505_연령별인구현황_월간.csv", encoding="cp949")
     df["지역"] = df["행정구역"].str.split("(").str[0].str.strip()
-    
-    # 숫자형 변환 (콤마 제거)
-    for col in ["총인구수", "내국인수", "외국인수"]:
+
+    # 🔍 외국인/내국인/총 인구 관련 컬럼 자동 탐색
+    foreign_col = next((col for col in df.columns if "외국인" in col and "계" in col), None)
+    native_col = next((col for col in df.columns if "내국인" in col and "계" in col), None)
+    total_col = next((col for col in df.columns if "총인구" in col or "총 계" in col or "계" == col.strip()), None)
+
+    if not all([foreign_col, native_col, total_col]):
+        st.error("❌ '외국인', '내국인', '총인구' 관련 컬럼을 찾을 수 없습니다. 파일 컬럼명을 확인해주세요.")
+        st.write("컬럼 목록:", df.columns.tolist())
+        st.stop()
+
+    # 콤마 제거 후 정수형 변환
+    for col in [foreign_col, native_col, total_col]:
         df[col] = df[col].astype(str).str.replace(",", "", regex=False).astype(int)
-    
+
     # 외국인 비율 계산
-    df["외국인비율"] = df["외국인수"] / df["총인구수"]
-    
-    return df
+    df["외국인비율"] = df[foreign_col] / df[total_col]
+
+    return df, foreign_col, total_col
 
 # ---------- UI ----------
 st.title("🌍 외국인 비율이 가장 높은 지역")
 
-df = load_data()
+df, foreign_col, total_col = load_data()
 
-# 외국인 비율 순으로 정렬
-top_df = df[["지역", "총인구수", "외국인수", "외국인비율"]].copy()
-top_df = top_df.drop_duplicates(subset="지역")  # 중복 제거
-top_df = top_df.sort_values(by="외국인비율", ascending=False)
+# 데이터 정리
+top_df = df[["지역", total_col, foreign_col, "외국인비율"]].drop_duplicates(subset="지역").copy()
 top_df["외국인비율(%)"] = (top_df["외국인비율"] * 100).round(2)
+top_df = top_df.sort_values(by="외국인비율", ascending=False)
 
 # ---------- 결과 출력 ----------
 st.subheader("🏆 외국인 비율 TOP 지역")

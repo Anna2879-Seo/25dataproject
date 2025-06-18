@@ -6,15 +6,20 @@ import koreanize_matplotlib  # 한글 깨짐 방지
 st.set_page_config(page_title="🗺️ 지역별 인구 구조 대시보드", layout="wide")
 
 @st.cache_data
-def load_data() -> tuple[pd.DataFrame, list]:
+def load_data() -> tuple[pd.DataFrame, list, list]:
     """
-    CSV를 읽고 필요한 컬럼만 정리해서 리턴
+    CSV를 읽고 필요한 컬럼 정리 및 연령 레이블을 반환
     """
     df = pd.read_csv("202505_202505_연령별인구현황_월간.csv", encoding="cp949")
     df["지역"] = df["행정구역"].str.split("(").str[0].str.strip()
 
-    age_cols = [c for c in df.columns if c.endswith("세") and "_계_" in c]
+    # 연령별 컬럼만 필터링
+    age_cols = [col for col in df.columns if "_계_" in col and col.endswith("세")]
 
+    # '2025년_계_0세' → '0세' 등으로 가공
+    age_labels = [col.split("_")[-1] for col in age_cols]
+
+    # 콤마 제거하고 숫자로 변환
     for col in age_cols:
         df[col] = (
             df[col]
@@ -23,12 +28,12 @@ def load_data() -> tuple[pd.DataFrame, list]:
             .astype(int)
         )
 
-    return df, age_cols
+    return df, age_cols, age_labels
 
 
 # ---------- 🌐 UI ----------
 st.title("🔍 지역별 인구 구조 대시보드")
-df, age_cols = load_data()
+df, age_cols, age_labels = load_data()
 
 regions = sorted(df["지역"].unique())
 selected = st.sidebar.multiselect("✅ 분석할 지역(복수 선택 가능)", regions, default=["서울특별시"])
@@ -43,10 +48,8 @@ chart_type = st.sidebar.selectbox("차트 유형", ("꺾은선 그래프", "막�
 subset = df[df["지역"].isin(selected)]
 agg = subset.groupby("지역")[age_cols].sum().T
 
-# 인덱스: '2024년_계_0세' → 숫자만 추출
-ages = agg.index.str.extract(r"(\d+)").astype(int).squeeze()
-ages_label = ages.astype(str) + "세"  # → '0세', '1세', ..., '100세'
-agg.index = ages_label
+# 인덱스를 나이 라벨로 설정
+agg.index = age_labels
 
 # ---------- 🎨 그래프 ----------
 if chart_type.startswith("꺾은선"):
@@ -61,12 +64,12 @@ else:
     if len(selected) == 1:
         pop = agg[selected[0]]
         pop_neg = pop.copy()
-        pop_neg.iloc[:] *= -1  # 좌우대칭용
+        pop_neg *= -1  # 좌우 대칭용
 
         pyr = pd.DataFrame({
             "남녀합계(왼쪽)": pop_neg,
             "남녀합계(오른쪽)": pop
-        })
+        }, index=agg.index)
 
         fig = px.bar(
             pyr,
